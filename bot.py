@@ -104,7 +104,6 @@ def close_modals(driver):
 
 
 def js_fill(driver, selector, value, label="field"):
-    """Isi input signup/OTP via JS (cocok untuk form biasa)."""
     result = driver.execute_script("""
         const sel = arguments[0], val = arguments[1];
         const el = document.querySelector(sel);
@@ -126,14 +125,9 @@ def js_fill(driver, selector, value, label="field"):
 
 
 def fill_input_onboarding(driver, selectors, value, label="field", label_hint="", silent=False):
-    """
-    Isi input via NATIVE Selenium click + send_keys + ActionChains.
-    Fallback ke JS setter kalau native gagal — trigger semua event React.
-    """
     el = None
     sel_list = [s.strip() for s in selectors.split(",") if s.strip()]
 
-    # --- cari elemen visible pertama ---
     for s in sel_list:
         try:
             els = driver.find_elements(By.CSS_SELECTOR, s)
@@ -146,7 +140,6 @@ def fill_input_onboarding(driver, selectors, value, label="field", label_hint=""
         except Exception:
             continue
 
-    # --- fallback via label ---
     if not el and label_hint:
         try:
             xp = (f"//label[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', "
@@ -167,21 +160,17 @@ def fill_input_onboarding(driver, selectors, value, label="field", label_hint=""
         driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
         time.sleep(0.4)
 
-        # native click via ActionChains
         ActionChains(driver).move_to_element(el).pause(0.15).click().perform()
         time.sleep(0.2)
 
-        # clear
         el.send_keys(Keys.CONTROL, "a")
         el.send_keys(Keys.DELETE)
         time.sleep(0.15)
 
-        # ketik per karakter
         for ch in str(value):
             el.send_keys(ch)
             time.sleep(0.03)
 
-        # blur → commit React state
         driver.execute_script("arguments[0].blur();", el)
         time.sleep(0.3)
 
@@ -190,7 +179,6 @@ def fill_input_onboarding(driver, selectors, value, label="field", label_hint=""
             print(Fore.GREEN + f"[✓] {label} = {actual!r}")
             return True
 
-        # fallback paksa native setter + semua event
         driver.execute_script("""
             const el = arguments[0], val = arguments[1];
             const setter = Object.getOwnPropertyDescriptor(
@@ -214,8 +202,6 @@ def fill_input_onboarding(driver, selectors, value, label="field", label_hint=""
 
 def fill_autocomplete_onboarding(driver, selectors, text_value, label="autocomplete",
                                   label_hint="", silent=False):
-    """Isi field autocomplete (city, college, skills, interest)."""
-    # cari elemen
     el = None
     sel_list = [s.strip() for s in selectors.split(",") if s.strip()]
     for s in sel_list:
@@ -261,7 +247,6 @@ def fill_autocomplete_onboarding(driver, selectors, text_value, label="autocompl
 
         time.sleep(2.0)
 
-        # klik saran dropdown
         clicked = driver.execute_script("""
             const val = arguments[0].toLowerCase();
             const selectors = [
@@ -292,7 +277,6 @@ def fill_autocomplete_onboarding(driver, selectors, text_value, label="autocompl
             print(Fore.GREEN + f"[✓] {label} dipilih: {clicked!r}")
             return True
         else:
-            # gak ada dropdown — paksa commit value
             driver.execute_script("""
                 const el = arguments[0], val = arguments[1];
                 const setter = Object.getOwnPropertyDescriptor(
@@ -313,9 +297,6 @@ def fill_autocomplete_onboarding(driver, selectors, text_value, label="autocompl
 
 
 def click_chip(driver, text, label=None, silent=False):
-    """
-    Klik chip pakai ActionChains — trigger React onClick real.
-    """
     label = label or text
     target = None
 
@@ -360,7 +341,6 @@ def click_chip(driver, text, label=None, silent=False):
         ActionChains(driver).move_to_element(target).pause(0.15).click().perform()
         time.sleep(0.4)
 
-        # klik parent wrapper (label/button) juga
         try:
             parent = target.find_element(
                 By.XPATH,
@@ -555,6 +535,23 @@ def is_verify_page(driver):
 def handle_verification(driver, email, mode, gmail_user=None, gmail_pass=None):
     print(Fore.CYAN + "\n[*] halaman verifikasi terdeteksi.")
     driver.save_screenshot("verify_page.png")
+    print(Fore.YELLOW + f"[i] URL verify: {driver.current_url}")
+
+    print(Fore.CYAN + "\n=== FORM ELEMENTS DI HALAMAN VERIFY ===")
+    for tag in ["input", "button", "a", "form"]:
+        for el in driver.find_elements(By.TAG_NAME, tag):
+            try:
+                el_id   = el.get_attribute("id")
+                el_name = el.get_attribute("name")
+                el_type = el.get_attribute("type")
+                el_ph   = el.get_attribute("placeholder")
+                el_text = (el.text or "")[:40]
+                if el_id or el_name or el_ph or el_text:
+                    print(f"[{tag}] id={el_id!r} name={el_name!r} "
+                          f"type={el_type!r} placeholder={el_ph!r} text={el_text!r}")
+            except Exception:
+                pass
+    print("=== END DUMP ===\n")
 
     otp = None
     link = None
@@ -578,38 +575,109 @@ def handle_verification(driver, email, mode, gmail_user=None, gmail_pass=None):
             time.sleep(WAIT_LONG)
             return True
         if len(user_input) < 6:
-            print(Fore.RED + f"[!] OTP harus 6 digit (baru {len(user_input)}).")
+            print(Fore.RED + f"[!] OTP minimal 6 digit (baru {len(user_input)}).")
             continue
         otp = user_input
 
     print(Fore.CYAN + f"[*] isi OTP: {otp}")
-    ok = js_fill(
-        driver,
-        "input[name='otp'], input#otp, input[name='verification_code'], "
-        "input[type='text'], input[type='number']",
-        otp,
-        "otp"
-    )
-    if not ok:
+
+    filled = False
+    otp_candidates = [
+        "input[name='otp']", "input#otp", "input[name='verification_code']",
+        "input[placeholder*='OTP' i]", "input[placeholder*='code' i]",
+        "input[type='tel']", "input[type='number']", "input[type='text']"
+    ]
+    for sel in otp_candidates:
+        try:
+            els = driver.find_elements(By.CSS_SELECTOR, sel)
+            for e in els:
+                if e.is_displayed() and e.is_enabled():
+                    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", e)
+                    time.sleep(0.3)
+                    ActionChains(driver).move_to_element(e).pause(0.15).click().perform()
+                    time.sleep(0.2)
+                    e.send_keys(Keys.CONTROL, "a")
+                    e.send_keys(Keys.DELETE)
+                    for ch in str(otp):
+                        e.send_keys(ch)
+                        time.sleep(0.05)
+                    driver.execute_script("arguments[0].blur();", e)
+                    print(Fore.GREEN + f"[✓] OTP diisi via {sel}")
+                    filled = True
+                    break
+            if filled:
+                break
+        except Exception:
+            continue
+
+    if not filled:
         print(Fore.RED + "[!] gagal isi OTP")
         return False
 
+    driver.save_screenshot("otp_filled.png")
     time.sleep(1)
-    click_chip(driver, "verify", "verify", silent=True)
-    if is_verify_page(driver):
-        click_chip(driver, "submit", "submit", silent=True)
-    time.sleep(WAIT_LONG)
 
-    if is_verify_page(driver):
-        print(Fore.RED + "[!] masih di halaman verifikasi.")
+    print(Fore.CYAN + "[*] klik tombol verifikasi...")
+    clicked = False
+    for btn_text in ["Verify", "Submit", "Continue", "Confirm", "Next"]:
+        if click_chip(driver, btn_text, f"Button ({btn_text})", silent=True):
+            clicked = True
+            break
+
+    if not clicked:
+        try:
+            btns = driver.find_elements(
+                By.CSS_SELECTOR,
+                "button[type='submit'], button.btn-primary"
+            )
+            for b in btns:
+                if b.is_displayed() and b.is_enabled():
+                    ActionChains(driver).move_to_element(b).pause(0.15).click().perform()
+                    print(Fore.GREEN + "[✓] klik button[type=submit]")
+                    clicked = True
+                    break
+        except Exception:
+            pass
+
+    time.sleep(WAIT_LONG + 3)
+
+    print(Fore.YELLOW + f"\n[i] URL setelah submit OTP: {driver.current_url}")
+    print(Fore.YELLOW + f"[i] Title: {driver.title}")
+    driver.save_screenshot("after_otp_submit.png")
+
+    page_lower = driver.page_source.lower()
+    cur_lower = driver.current_url.lower()
+
+    err = get_form_errors(driver)
+    if err:
+        print(Fore.RED + f"[!] Error di halaman: {err}")
+
+    still_verify = any(k in cur_lower for k in ["verify", "otp", "confirm"]) or \
+                   any(k in page_lower for k in ["enter otp", "verification code",
+                                                  "invalid otp", "incorrect otp"])
+
+    if still_verify:
+        print(Fore.RED + "[!] masih di halaman verifikasi setelah submit.")
+        print(Fore.CYAN + "\n=== ELEMENTS SETELAH SUBMIT OTP ===")
+        for tag in ["input", "button", "a"]:
+            for el in driver.find_elements(By.TAG_NAME, tag):
+                try:
+                    el_id = el.get_attribute("id")
+                    el_ph = el.get_attribute("placeholder")
+                    el_tx = (el.text or "")[:40]
+                    if el_id or el_ph or el_tx:
+                        print(f"[{tag}] id={el_id!r} placeholder={el_ph!r} text={el_tx!r}")
+                except Exception:
+                    pass
+        print("=== END DUMP ===\n")
         return False
 
-    print(Fore.GREEN + "[✓] verifikasi berhasil.")
+    print(Fore.GREEN + "[✓] verifikasi berhasil, lanjut ke onboarding.")
     return True
 
 
 # ============================================================
-#  ONBOARDING SECTIONS
+#  ONBOARDING
 # ============================================================
 def fill_skills_and_education_section(driver):
     print(Fore.CYAN + "\n[*] memeriksa bagian Education / #skills-section...")
@@ -719,7 +787,6 @@ def fill_onboarding(driver):
     driver.save_screenshot("onboarding_start.png")
     print(Fore.YELLOW + f"[i] URL Tahap 1: {driver.current_url}")
 
-    # 1. PHONE
     fill_input_onboarding(
         driver,
         "input[placeholder*='Mobile number' i], input[placeholder*='Mobile' i], "
@@ -729,7 +796,6 @@ def fill_onboarding(driver):
     )
     time.sleep(0.5)
 
-    # 2. CURRENT CITY
     fill_autocomplete_onboarding(
         driver,
         "input[placeholder*='Current location' i], input[placeholder*='location' i], "
@@ -738,23 +804,19 @@ def fill_onboarding(driver):
     )
     time.sleep(0.6)
 
-    # 3. GENDER
     click_chip(driver, GENDER, f"Gender ({GENDER})")
     time.sleep(0.5)
 
-    # 4. LANGUAGES
     for lang in LANGUAGES:
         click_chip(driver, lang, f"Language ({lang})")
         time.sleep(0.4)
 
-    # 5. TYPE
     if not click_chip(driver, USER_TYPE, f"Type ({USER_TYPE})"):
         click_chip(driver, "College student", "Type (College student)")
     time.sleep(0.5)
 
     driver.save_screenshot("onboarding_filled.png")
 
-    # 6. Next
     print(Fore.CYAN + "[*] klik Next pada Personal Details...")
     click_next_or_save(driver, "Next (Personal Details)")
     time.sleep(WAIT_LONG)
