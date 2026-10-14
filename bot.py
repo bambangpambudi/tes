@@ -34,15 +34,15 @@ SEL_LAST_NAME  = "#last_name"
 SEL_SIGNUP_BTN = "#registration_submit"
 SEL_QR_CLOSE   = "#app_qr_modal_close"
 
-# Selector verifikasi (kemungkinan — kalau salah, debug dulu)
+# Selector verifikasi
 SEL_OTP_INPUT  = "input[name='otp'], input#otp, input[name='verification_code']"
 SEL_OTP_SUBMIT = "button#verify_submit, button[type='submit']"
 
-# Selector onboarding/profil
-SEL_PHONE      = "input[name='phone'], #phone"
-SEL_CITY       = "select[name='city'], #city, input[name='city']"
-SEL_GENDER     = "select[name='gender']"
-SEL_USER_TYPE  = "select[name='user_type']"
+# Selector onboarding
+SEL_PHONE          = "input[name='phone'], #phone"
+SEL_CITY           = "select[name='city'], #city, input[name='city']"
+SEL_GENDER         = "select[name='gender']"
+SEL_USER_TYPE      = "select[name='user_type']"
 SEL_PROFILE_SUBMIT = "button[type='submit'], #profile_submit"
 
 WAIT_SHORT = 2
@@ -153,14 +153,10 @@ def is_valid_email(email):
 
 
 # ============================================================
-#  IMAP — auto-ambil OTP/link dari Gmail
+#  IMAP
 # ============================================================
 def fetch_otp_from_gmail(gmail_user, gmail_app_pass, sender="internshala",
                           wait_seconds=90):
-    """
-    Cek inbox Gmail, cari email dari Internshala, ambil OTP 6 digit
-    atau link verifikasi. Cek tiap 5 detik sampai timeout.
-    """
     try:
         mail = imaplib.IMAP4_SSL("imap.gmail.com")
         mail.login(gmail_user, gmail_app_pass)
@@ -172,11 +168,9 @@ def fetch_otp_from_gmail(gmail_user, gmail_app_pass, sender="internshala",
     elapsed = 0
     while elapsed < wait_seconds:
         try:
-            # cari email unread dari internshala
             _, data = mail.search(None, f'(UNSEEN FROM "{sender}")')
             ids = data[0].split()
             if ids:
-                # ambil yang terbaru
                 _, msg_data = mail.fetch(ids[-1], "(RFC822)")
                 msg = email_lib.message_from_bytes(msg_data[0][1])
                 body = ""
@@ -189,9 +183,7 @@ def fetch_otp_from_gmail(gmail_user, gmail_app_pass, sender="internshala",
                 else:
                     body = msg.get_payload(decode=True).decode(errors="ignore")
 
-                # cari OTP 6 digit
                 otp_match = re.search(r"\b(\d{6})\b", body)
-                # cari link verifikasi
                 link_match = re.search(
                     r'https?://[^\s"\'<>]*(?:verify|confirm|activation)[^\s"\'<>]*',
                     body
@@ -200,7 +192,6 @@ def fetch_otp_from_gmail(gmail_user, gmail_app_pass, sender="internshala",
                 otp = otp_match.group(1) if otp_match else None
                 link = link_match.group(0) if link_match else None
 
-                # tandai read
                 mail.store(ids[-1], "+FLAGS", "\\Seen")
                 mail.logout()
                 return otp, link
@@ -233,17 +224,12 @@ def is_verify_page(driver):
 
 
 def handle_verification(driver, email, mode, gmail_user=None, gmail_pass=None):
-    """
-    mode: "manual" | "auto"
-    return: True kalau verified, False kalau gagal
-    """
     print(Fore.CYAN + "\n[*] halaman verifikasi terdeteksi.")
     driver.save_screenshot("verify_page.png")
 
     otp = None
     link = None
 
-    # -------- AUTO MODE --------
     if mode == "auto":
         if not gmail_user or not gmail_pass:
             print(Fore.RED + "[!] Gmail creds kosong, fallback ke manual.")
@@ -262,7 +248,6 @@ def handle_verification(driver, email, mode, gmail_user=None, gmail_pass=None):
             if otp:
                 print(Fore.GREEN + f"[✓] OTP ditemukan: {otp}")
 
-    # -------- MANUAL MODE / FALLBACK --------
     if mode == "manual":
         print(Fore.YELLOW + "\n[i] Cek email kamu. Ada OTP atau link verifikasi.")
         print(Fore.YELLOW + "[i] Kalau ada link: copy paste di bawah + Enter.")
@@ -277,12 +262,10 @@ def handle_verification(driver, email, mode, gmail_user=None, gmail_pass=None):
         else:
             otp = user_input
 
-    # -------- ISI OTP DI FORM --------
     if otp:
         print(Fore.CYAN + f"[*] isi OTP: {otp}")
         ok = safe_fill(driver, SEL_OTP_INPUT, otp, "otp")
         if not ok:
-            # coba beberapa selector alternatif
             for alt in ["input[type='text']", "input[type='number']", "input.form-control"]:
                 try:
                     el = driver.find_element(By.CSS_SELECTOR, alt)
@@ -312,21 +295,50 @@ def handle_verification(driver, email, mode, gmail_user=None, gmail_pass=None):
 
 
 # ============================================================
-#  ONBOARDING — setelah verified
+#  ONBOARDING
 # ============================================================
 def fill_onboarding(driver):
-    """
-    Setelah verify, Internshala bawa ke onboarding: isi phone, city, dsb.
-    """
     print(Fore.CYAN + "\n[*] mulai onboarding profil...")
     time.sleep(WAIT_LONG)
     driver.save_screenshot("onboarding_start.png")
+    print(Fore.YELLOW + f"[i] URL onboarding: {driver.current_url}")
+
+    # ============ DUMP FORM ELEMENTS ============
+    print(Fore.CYAN + "\n=== FORM ELEMENTS DI HALAMAN ONBOARDING ===")
+    for tag in ["input", "select", "button", "textarea"]:
+        els = driver.find_elements(By.TAG_NAME, tag)
+        for i, el in enumerate(els):
+            try:
+                el_id    = el.get_attribute("id")
+                el_name  = el.get_attribute("name")
+                el_class = el.get_attribute("class")
+                el_type  = el.get_attribute("type")
+                el_ph    = el.get_attribute("placeholder")
+                el_text  = (el.text or "")[:50]
+                # untuk select, list option-nya
+                opts = ""
+                if tag == "select":
+                    try:
+                        opts = " | ".join(
+                            o.text for o in el.find_elements(By.TAG_NAME, "option")
+                        )[:120]
+                    except Exception:
+                        pass
+                if el_id or el_name or el_ph:
+                    print(f"[{tag}] id={el_id!r} name={el_name!r} type={el_type!r} "
+                          f"placeholder={el_ph!r} class={el_class!r} text={el_text!r} "
+                          f"options={opts!r}")
+            except Exception:
+                pass
+    print("=== END DUMP ===\n")
+    driver.save_screenshot("onboarding_debug.png")
+    # ============================================
 
     # ---- phone ----
     safe_fill(driver, SEL_PHONE, PHONE, "phone")
     time.sleep(0.7)
 
-    # ---- city (dropdown atau input) ----
+    # ---- city ----
     try:
         city_el = driver.find_element(By.CSS_SELECTOR, SEL_CITY)
         tag = city_el.tag_name.lower()
@@ -357,7 +369,6 @@ def fill_onboarding(driver):
 
     driver.save_screenshot("onboarding_filled.png")
 
-    # ---- submit ----
     if safe_click(driver, SEL_PROFILE_SUBMIT, "profile submit"):
         time.sleep(WAIT_LONG)
         driver.save_screenshot("onboarding_done.png")
@@ -455,7 +466,6 @@ def main():
 
     headless = input("Headless? (y/n, default y): ").strip().lower() != "n"
 
-    # pilih mode verifikasi
     print(Fore.CYAN + "\nMode verifikasi:")
     print("  1. Manual — kamu copy OTP/link dari email")
     print("  2. Auto   — pakai IMAP Gmail (butuh App Password)")
@@ -484,7 +494,6 @@ def main():
             print(Fore.CYAN + f"\n--- proses: {email} ---")
             result = signup(driver, email)
 
-            # -------- HANDLE VERIFIKASI --------
             if result == "verify_email":
                 if handle_verification(driver, email, vmode, gmail_user, gmail_pass):
                     print(Fore.GREEN + "[✓] verified. lanjut onboarding...")
@@ -494,7 +503,6 @@ def main():
                     print(Fore.RED + "[!] verifikasi gagal/ketinggalan.")
                     result = "verify_failed"
 
-            # -------- LANGSUNG DASHBOARD --------
             elif result == "success":
                 fill_onboarding(driver)
                 result = "verified"
