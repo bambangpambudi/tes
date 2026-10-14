@@ -22,7 +22,6 @@ init(autoreset=True)
 #  CONFIG — Indian Data
 # ============================================================
 SIGNUP_URL = "https://internshala.com/registration/student"
-LOGIN_URL  = "https://internshala.com/login/user"
 
 PASSWORD  = "Dermaga07"
 NAME      = "Arya Rahman"
@@ -85,12 +84,12 @@ def build_driver(headless=False):
 # ============================================================
 def close_modals(driver):
     try:
-        qr = WebDriverWait(driver, 3).until(
+        qr = WebDriverWait(driver, 4).until(
             EC.element_to_be_clickable((By.CSS_SELECTOR, "#app_qr_modal_close"))
         )
         qr.click()
         print(Fore.GREEN + "[✓] QR modal closed")
-        time.sleep(0.5)
+        time.sleep(1)
     except Exception:
         pass
     try:
@@ -104,7 +103,7 @@ def close_modals(driver):
 
 
 def js_fill(driver, selector, value, label="field"):
-    """Fungsi pengisi cepat untuk halaman Signup & Login."""
+    """Persis fungsi js_fill kode awal Anda untuk halaman Signup & OTP."""
     result = driver.execute_script("""
         const sel = arguments[0], val = arguments[1];
         const el = document.querySelector(sel);
@@ -127,15 +126,12 @@ def js_fill(driver, selector, value, label="field"):
 
 def find_visible_input(driver, selectors, label_hint=""):
     """
-    Mencari elemen <input> yang sedang tampil (visible) berdasarkan:
-    1. Daftar CSS Selector (placeholder, id, name)
-    2. Teks label di dekatnya (misal 'Contact number' atau 'Current city')
+    Mencari elemen <input> yang sedang tampil di halaman Onboarding ('Let's get started').
     """
     return driver.execute_script("""
         const sels = arguments[0].split(',').map(s => s.trim()).filter(Boolean);
         const hint = (arguments[1] || '').toLowerCase();
 
-        // 1. Cari dari CSS selector yang visible
         for (const s of sels) {
             const nodes = document.querySelectorAll(s);
             for (const n of nodes) {
@@ -146,7 +142,6 @@ def find_visible_input(driver, selectors, label_hint=""):
             }
         }
 
-        // 2. Fallback: cari berdasarkan teks Label di atasnya (misal "Contact number" atau "Current city")
         if (hint) {
             const labels = Array.from(document.querySelectorAll('label, div, span, p'));
             for (const lb of labels) {
@@ -171,7 +166,7 @@ def find_visible_input(driver, selectors, label_hint=""):
 def fill_input_onboarding(driver, selectors, value, label="field", label_hint=""):
     """
     Mengisi input di halaman 'Let's get started' (seperti Mobile number)
-    menggunakan kombinasi klik asli, send_keys, dan React/Vue native value setter.
+    menggunakan kombinasi klik, send_keys, dan React/Vue native value setter.
     """
     el = find_visible_input(driver, selectors, label_hint)
     if not el:
@@ -187,7 +182,6 @@ def fill_input_onboarding(driver, selectors, value, label="field", label_hint=""
     except Exception:
         pass
 
-    # Pastikan ter-assign di DOM & memicu state React/jQuery
     final_val = driver.execute_script("""
         const el = arguments[0], val = arguments[1];
         el.focus();
@@ -208,7 +202,7 @@ def fill_input_onboarding(driver, selectors, value, label="field", label_hint=""
 def fill_autocomplete_onboarding(driver, selectors, text_value, label="autocomplete", label_hint=""):
     """
     Mengisi field Autocomplete seperti 'Current location' (Current city), College, Degree, Stream.
-    Wajib mengetik per huruf lalu mengeklik pilihan yang muncul di dropdown!
+    Mengetik per huruf lalu mengeklik pilihan yang muncul di dropdown.
     """
     el = find_visible_input(driver, selectors, label_hint)
     if not el:
@@ -222,7 +216,6 @@ def fill_autocomplete_onboarding(driver, selectors, text_value, label="autocompl
         el.clear()
         driver.execute_script("arguments[0].value = '';", el)
 
-        # Ketik per karakter dan picu event input di tiap huruf agar dropdown AJAX keluar
         for ch in text_value:
             el.send_keys(ch)
             driver.execute_script("""
@@ -231,18 +224,18 @@ def fill_autocomplete_onboarding(driver, selectors, text_value, label="autocompl
                 el.dispatchEvent(new KeyboardEvent('keydown', {bubbles: true}));
                 el.dispatchEvent(new KeyboardEvent('keyup', {bubbles: true}));
             """, el)
-            time.sleep(0.1)
+            time.sleep(0.08)
 
-        time.sleep(2.0)  # Tunggu saran kota/kampus muncul dari server Internshala
+        time.sleep(2.0)
 
-        # Cari dan klik item dropdown yang muncul
         clicked = driver.execute_script("""
             const val = arguments[0].toLowerCase();
             const selectors = [
                 '.ui-menu-item', '.ui-menu-item-wrapper', '.autocomplete-suggestion',
                 '.pac-item', 'ul[role="listbox"] li', '.city-dropdown li',
                 '.dropdown-menu li', '.autocomplete-items div', '.chosen-results li',
-                'ul.ui-autocomplete li', 'div[class*="autocomplete"] li', 'div[class*="dropdown"] li'
+                'ul.ui-autocomplete li', 'div[class*="autocomplete"] li', 'div[class*="dropdown"] li',
+                'li[role="option"]'
             ];
             const items = Array.from(document.querySelectorAll(selectors.join(', ')));
             for (const item of items) {
@@ -262,7 +255,6 @@ def fill_autocomplete_onboarding(driver, selectors, text_value, label="autocompl
             print(Fore.GREEN + f"[✓] {label} dipilih dari dropdown: {clicked!r}")
             return True
         else:
-            # Fallback: gunakan tombol panah bawah + Enter
             el.send_keys(Keys.ARROW_DOWN)
             time.sleep(0.4)
             el.send_keys(Keys.ENTER)
@@ -277,11 +269,7 @@ def fill_autocomplete_onboarding(driver, selectors, text_value, label="autocompl
 
 def click_chip(driver, text, label=None):
     """
-    Mengeklik pill/chip di halaman 'Let's get started':
-    - Gender: '🙋‍♂️ Male'
-    - Languages: 'English +', 'Hindi +'
-    - Type: 'Fresher', 'College student'
-    Memicu MouseEvent penuh + mengeklik <input type="radio/checkbox"> di dalamnya jika ada.
+    Mengeklik pill/chip di halaman 'Let's get started' (Male, English +, Hindi +, Fresher).
     """
     label = label or text
     el = driver.execute_script(r"""
@@ -297,33 +285,30 @@ def click_chip(driver, text, label=None):
 
         for (const n of nodes) {
             const rect = n.getBoundingClientRect();
-            if (rect.width < 15 || rect.height < 15 || rect.height > 80) continue;
+            if (rect.width < 15 || rect.height < 15 || rect.height > 85) continue;
             if (n.offsetParent === null && rect.top === 0) continue;
 
             let raw = (n.textContent || n.value || '').trim();
             if (!raw || raw.length > 40) continue;
 
-            // Hilangkan emoji, tanda '+', dan spasi untuk perbandingan bersih
             let clean = raw.toLowerCase().replace(/[^a-z0-9]+/g, '');
             if (!clean) continue;
 
             const childrenCount = n.children.length;
 
             if (clean === cleanTarget) {
-                exact.push({el: n, childrenCount, len: raw.length, text: raw});
+                exact.push({el: n, childrenCount, len: raw.length});
             } else if (raw.toLowerCase().includes(rawTarget) && raw.length <= rawTarget.length + 6) {
-                partial.push({el: n, childrenCount, len: raw.length, text: raw});
+                partial.push({el: n, childrenCount, len: raw.length});
             }
         }
 
         const pool = exact.length ? exact : partial;
         if (!pool.length) return null;
 
-        // Utamakan elemen spesifik (bukan container besar)
         pool.sort((a, b) => (a.childrenCount - b.childrenCount) || (a.len - b.len));
         let targetEl = pool[0].el;
 
-        // Jika target berada di dalam <label> atau <button>, ambil pembungkusnya
         const wrapper = targetEl.closest('label, button, [role="button"], .chip, .pill');
         return wrapper || targetEl;
     """, text)
@@ -335,12 +320,10 @@ def click_chip(driver, text, label=None):
     try:
         driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
         time.sleep(0.2)
-        # 1. Klik fisik menggunakan Selenium ActionChains
         ActionChains(driver).move_to_element(el).click().perform()
     except Exception:
         pass
 
-    # 2. Pastikan input radio/checkbox di dalamnya ikut tercentang via JS
     matched_text = driver.execute_script("""
         const el = arguments[0];
         el.dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));
@@ -363,7 +346,6 @@ def click_chip(driver, text, label=None):
 
 
 def select_dropdown_or_chip(driver, selectors, value, label="dropdown"):
-    """Pilih opsi dari <select> atau isi sebagai autocomplete/chip."""
     selected = driver.execute_script("""
         const sels = arguments[0].split(',').map(s => s.trim());
         const val = arguments[1].toLowerCase();
@@ -429,7 +411,7 @@ def fetch_otp_from_gmail(gmail_user, gmail_app_pass, sender="internshala",
 
                 otp_match = re.search(r"\b(\d{6})\b", body)
                 link_match = re.search(
-                    r'https?://[^\s"\'<>]*(?:verify|confirm|activation|student)[^\s"\'<>]*',
+                    r'https?://[^\s"\'<>]*(?:verify|confirm|activation)[^\s"\'<>]*',
                     body
                 )
 
@@ -471,10 +453,10 @@ def handle_verification(driver, email, mode, gmail_user=None, gmail_pass=None):
     link = None
 
     if mode == "auto" and gmail_user and gmail_pass:
-        print(Fore.CYAN + "[*] ambil OTP/Link dari Gmail...")
+        print(Fore.CYAN + "[*] ambil OTP dari Gmail...")
         otp, link = fetch_otp_from_gmail(gmail_user, gmail_pass)
         if link:
-            print(Fore.GREEN + f"[✓] Membuka link verifikasi di browser bot: {link[:80]}...")
+            print(Fore.GREEN + f"[✓] link: {link[:80]}...")
             driver.get(link)
             time.sleep(WAIT_LONG)
             return True
@@ -482,10 +464,9 @@ def handle_verification(driver, email, mode, gmail_user=None, gmail_pass=None):
             print(Fore.GREEN + f"[✓] OTP: {otp}")
 
     if not otp:
-        print(Fore.YELLOW + "\n[i] PENTING: Jangan klik link di HP! Salin (Copy) Link Verifikasi / OTP 6 digit dari email lalu Paste di sini:")
-        user_input = input(Fore.CYAN + "Paste OTP / Link Verifikasi: ").strip()
+        print(Fore.YELLOW + "\n[i] Cek email. Copy OTP 6 digit atau paste link verifikasi (jangan diklik di HP).")
+        user_input = input(Fore.CYAN + "OTP / Link: ").strip()
         if user_input.startswith("http"):
-            print(Fore.CYAN + "[*] Membuka link verifikasi di browser bot...")
             driver.get(user_input)
             time.sleep(WAIT_LONG)
             return True
@@ -645,9 +626,8 @@ def fill_preferences(driver):
 
 
 def fill_onboarding(driver):
-    print(Fore.CYAN + "\n[*] mulai mengisi halaman 'Let's get started' (Personal Details)...")
+    print(Fore.CYAN + "\n[*] mulai onboarding profil ('Let's get started')...")
 
-    # Tunggu sampai form Let's get started tampil
     try:
         WebDriverWait(driver, 15).until(
             EC.presence_of_element_located((
@@ -656,14 +636,14 @@ def fill_onboarding(driver):
             ))
         )
     except Exception:
-        print(Fore.YELLOW + "[~] Menunggu render form tambahan...")
+        print(Fore.YELLOW + "[~] Menunggu render halaman Personal Details...")
 
     time.sleep(2)
     close_modals(driver)
     driver.save_screenshot("onboarding_start.png")
     print(Fore.YELLOW + f"[i] URL: {driver.current_url}")
 
-    # 1. PHONE (Sesuai screenshot: placeholder="Mobile number" di bawah label "Contact number")
+    # 1. PHONE (placeholder="Mobile number" di bawah label "Contact number")
     fill_input_onboarding(
         driver,
         "input[placeholder*='Mobile number' i], input[placeholder*='Mobile' i], #phone, #phone_primary, input[name='phone'], input[name='phone_primary'], input[type='tel']",
@@ -673,7 +653,7 @@ def fill_onboarding(driver):
     )
     time.sleep(0.5)
 
-    # 2. CURRENT CITY (Sesuai screenshot: placeholder="Current location" di bawah label "Current city")
+    # 2. CURRENT CITY (placeholder="Current location" di bawah label "Current city")
     fill_autocomplete_onboarding(
         driver,
         "input[placeholder*='Current location' i], input[placeholder*='location' i], #current_city, input[name='current_city'], input[placeholder*='city' i]",
@@ -683,32 +663,31 @@ def fill_onboarding(driver):
     )
     time.sleep(0.6)
 
-    # 3. GENDER (Sesuai screenshot: chip '🙋‍♂️ Male' / '🙋‍♀️ Female')
+    # 3. GENDER ('🙋‍♂️ Male' / '🙋‍♀️ Female')
     click_chip(driver, GENDER, f"Gender ({GENDER})")
     time.sleep(0.5)
 
-    # 4. LANGUAGES YOU KNOW (Sesuai screenshot: chip 'English +', 'Hindi +')
+    # 4. LANGUAGES YOU KNOW ('English +', 'Hindi +')
     for lang in LANGUAGES:
         click_chip(driver, lang, f"Language ({lang})")
         time.sleep(0.4)
 
-    # 5. TYPE (Sesuai screenshot: chip 'Fresher' / 'College student')
+    # 5. TYPE ('Fresher' / 'College student')
     if not click_chip(driver, USER_TYPE, f"Type ({USER_TYPE})"):
         click_chip(driver, "College student", "Type (College student)")
     time.sleep(0.5)
 
     driver.save_screenshot("onboarding_filled.png")
-    print(Fore.GREEN + "[✓] Screenshot hasil pengisian disimpan di: onboarding_filled.png")
 
     # 6. KLIK TOMBOL BIRU 'Next'
-    print(Fore.CYAN + "[*] klik tombol Next...")
+    print(Fore.CYAN + "[*] klik Next...")
     click_next_button(driver, "Next (Personal Details)")
     time.sleep(WAIT_LONG)
 
     driver.save_screenshot("onboarding_done.png")
     print(Fore.YELLOW + f"[i] URL setelah Next: {driver.current_url}")
 
-    # 7. Lanjut ke Education & Preferences jika diarahkan ke tahap berikutnya
+    # 7. Lanjut ke Education & Preferences
     for step in range(3):
         curr_url = driver.current_url.lower()
         page_src = driver.page_source.lower()
@@ -727,41 +706,10 @@ def fill_onboarding(driver):
 
 
 # ============================================================
-#  LOGIN FALLBACK (Jika akun sudah terdaftar tapi belum isi Personal Details)
-# ============================================================
-def login_existing_account(driver, email):
-    print(Fore.CYAN + f"\n[*] Mencoba login ke akun {email} untuk melanjutkan pengisian Personal Details...")
-    driver.get(LOGIN_URL)
-    time.sleep(WAIT_LONG)
-    close_modals(driver)
-
-    js_fill(driver, "#email, #modal_email, input[name='email']", email, "login email")
-    time.sleep(0.5)
-    js_fill(driver, "#password, #modal_password, input[name='password']", PASSWORD, "login password")
-    time.sleep(0.5)
-
-    try:
-        driver.find_element(By.CSS_SELECTOR, "#login_submit, #modal_login_submit, button[type='submit']").click()
-    except Exception:
-        driver.execute_script(
-            "const b = document.querySelector('#login_submit, #modal_login_submit, button[type=\"submit\"]'); if(b) b.click();"
-        )
-
-    time.sleep(WAIT_LONG)
-    print(Fore.YELLOW + f"[i] URL setelah login: {driver.current_url}")
-    driver.save_screenshot("after_login.png")
-
-    if "login" not in driver.current_url.lower():
-        return True
-    return False
-
-
-# ============================================================
-#  SIGNUP
+#  SIGNUP (Persis kode awal Anda tanpa auto-login)
 # ============================================================
 def signup(driver, email):
     print(Fore.CYAN + "[*] buka halaman signup...")
-    driver.delete_all_cookies()
     driver.get(SIGNUP_URL)
     time.sleep(WAIT_LONG)
     close_modals(driver)
@@ -795,29 +743,20 @@ def signup(driver, email):
     print(Fore.YELLOW + f"[i] URL: {current}")
     driver.save_screenshot("after_submit.png")
 
+    page = driver.page_source.lower()
+
     if is_verify_page(driver):
         print(Fore.GREEN + "[✓] masuk halaman verifikasi.")
         return "verify_email"
-    if any(k in current.lower() for k in ["dashboard", "onboarding", "personal_details", "student"]):
-        if "registration" not in current.lower():
-            print(Fore.GREEN + "[✓] langsung masuk onboarding/dashboard.")
-            return "success"
-
-    # Cek pesan error jika masih di halaman registrasi
-    err_msg = driver.execute_script("""
-        const els = document.querySelectorAll('.help-block, .error, #email-error, .toast-message, .alert');
-        return Array.from(els).map(e => e.textContent.trim()).filter(Boolean).join(' | ');
-    """) or ""
-
-    if err_msg:
-        print(Fore.YELLOW + f"[~] Pesan form: {err_msg}")
-        if any(w in err_msg.lower() for w in ["already", "exist", "registered"]):
-            return "already_exists"
-
-    # Jika tertahan di /registration/student (misal karena email sudah terdaftar), coba login otomatis
-    if "registration" in current.lower():
+    if "dashboard" in current or ("student" in current and "registration" not in current):
+        print(Fore.GREEN + "[✓] langsung masuk onboarding/dashboard.")
+        return "success"
+    if "already" in page or "exists" in page:
+        print(Fore.RED + "[!] email sudah terdaftar.")
         return "already_exists"
-
+    if "error" in page or "invalid" in page:
+        print(Fore.RED + "[!] error di form.")
+        return "error"
     return "unknown"
 
 
@@ -864,7 +803,7 @@ def main():
     headless = input("Headless? (y/n, default y): ").strip().lower() != "n"
 
     print(Fore.CYAN + "\nMode verifikasi:")
-    print("  1. Manual (Paste Link/OTP)")
+    print("  1. Manual")
     print("  2. Auto IMAP Gmail")
     vmode = input("Pilih (1/2, default 1): ").strip() or "1"
 
@@ -897,16 +836,9 @@ def main():
                     result = "verified"
                 else:
                     result = "verify_failed"
-
             elif result == "success":
                 fill_onboarding(driver)
                 result = "verified"
-
-            elif result == "already_exists":
-                print(Fore.YELLOW + "[i] Email sudah terdaftar. Mencoba login untuk mengisi Personal Details...")
-                if login_existing_account(driver, email):
-                    fill_onboarding(driver)
-                    result = "verified_via_login"
 
             log_account(email, result)
             print(Fore.GREEN + f"[✓] status akhir: {result}")
