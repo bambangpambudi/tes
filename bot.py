@@ -62,7 +62,7 @@ def build_driver(headless=False):
     opts.add_argument("--window-size=1366,900")
     opts.add_argument(
         "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     )
     opts.add_experimental_option("excludeSwitches", ["enable-automation"])
     opts.add_experimental_option("useAutomationExtension", False)
@@ -103,18 +103,23 @@ def close_modals(driver):
 
 def js_fill(driver, selector, value, label="field"):
     """
-    Isi input via Native Setter (kompatibel penuh dengan React/Vue)
-    dengan fallback ke Selenium send_keys jika diperlukan.
+    Cari elemen yang visible terlebih dahulu. Jika tidak ada yang terdeteksi via offsetParent
+    (misal di dalam fixed container atau headless), fallback ke elemen pertama yang cocok.
     """
     el = driver.execute_script("""
         const selectors = arguments[0].split(',').map(s => s.trim());
+        let firstFallback = null;
         for (const sel of selectors) {
             const nodes = document.querySelectorAll(sel);
             for (const n of nodes) {
-                if (n.offsetParent !== null && !n.disabled) return n;
+                if (!firstFallback) firstFallback = n;
+                const rect = n.getBoundingClientRect();
+                if ((n.offsetParent !== null || rect.width > 0 || rect.height > 0) && !n.disabled) {
+                    return n;
+                }
             }
         }
-        return null;
+        return firstFallback;
     """, selector)
 
     if not el:
@@ -123,15 +128,18 @@ def js_fill(driver, selector, value, label="field"):
 
     try:
         driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
-        time.sleep(0.2)
+        time.sleep(0.15)
         el.click()
         el.clear()
         el.send_keys(value)
     except Exception:
         pass
 
-    driver.execute_script("""
+    # Paksa update value & state React/Vue via Native Setter + Event Dispatch
+    result = driver.execute_script("""
         const el = arguments[0], val = arguments[1];
+        if (!el) return null;
+        el.focus();
         const nativeSetter = Object.getOwnPropertyDescriptor(
             window.HTMLInputElement.prototype, 'value'
         ).set;
@@ -144,9 +152,10 @@ def js_fill(driver, selector, value, label="field"):
         el.dispatchEvent(new Event('change', {bubbles: true}));
         el.dispatchEvent(new KeyboardEvent('keyup', {bubbles: true}));
         el.dispatchEvent(new Event('blur', {bubbles: true}));
+        return el.value;
     """, el, value)
 
-    print(Fore.GREEN + f"[✓] {label} = {value}")
+    print(Fore.GREEN + f"[✓] {label} = {result}")
     return True
 
 
@@ -157,10 +166,13 @@ def fill_city_autocomplete(driver, city_name):
     selectors = "#current_city, input[name='current_city'], input[placeholder*='City' i], input[placeholder*='location' i]"
     el = driver.execute_script("""
         const nodes = document.querySelectorAll(arguments[0]);
+        let fallback = null;
         for (const n of nodes) {
-            if (n.offsetParent !== null && !n.disabled) return n;
+            if (!fallback) fallback = n;
+            const rect = n.getBoundingClientRect();
+            if ((n.offsetParent !== null || rect.width > 0) && !n.disabled) return n;
         }
-        return null;
+        return fallback;
     """, selectors)
 
     if not el:
@@ -185,7 +197,8 @@ def fill_city_autocomplete(driver, city_name):
                 '.ui-menu-item, .ui-menu-item-wrapper, .autocomplete-suggestion, .pac-item, ul[role="listbox"] li, .city-dropdown li, .dropdown-menu li, .autocomplete-items div'
             ));
             for (const item of items) {
-                if (item.offsetParent !== null && item.textContent.toLowerCase().includes(city)) {
+                const rect = item.getBoundingClientRect();
+                if ((item.offsetParent !== null || rect.width > 0) && item.textContent.toLowerCase().includes(city)) {
                     item.click();
                     return item.textContent.trim();
                 }
@@ -204,8 +217,9 @@ def fill_city_autocomplete(driver, city_name):
             return True
 
     except Exception as e:
-        print(Fore.RED + f"[!] Gagal isi city: {e}")
-        return False
+        # Fallback menggunakan js_fill jika interaktif klik terhalang
+        js_fill(driver, "#current_city", city_name, "city (fallback)")
+        return True
 
 
 def fill_autocomplete_generic(driver, selectors, text_value, label="autocomplete"):
@@ -215,12 +229,15 @@ def fill_autocomplete_generic(driver, selectors, text_value, label="autocomplete
     """
     el = driver.execute_script("""
         const sels = arguments[0].split(',').map(s => s.trim());
+        let fallback = null;
         for (const s of sels) {
             for (const n of document.querySelectorAll(s)) {
-                if (n.offsetParent !== null && !n.disabled) return n;
+                if (!fallback) fallback = n;
+                const rect = n.getBoundingClientRect();
+                if ((n.offsetParent !== null || rect.width > 0) && !n.disabled) return n;
             }
         }
-        return null;
+        return fallback;
     """, selectors)
 
     if not el:
@@ -245,7 +262,8 @@ def fill_autocomplete_generic(driver, selectors, text_value, label="autocomplete
                 '.ui-menu-item, .ui-menu-item-wrapper, .autocomplete-suggestion, ul[role="listbox"] li, .dropdown-menu li, .autocomplete-items div, .chosen-results li'
             ));
             for (const item of items) {
-                if (item.offsetParent !== null && item.textContent.toLowerCase().includes(val)) {
+                const rect = item.getBoundingClientRect();
+                if ((item.offsetParent !== null || rect.width > 0) && item.textContent.toLowerCase().includes(val)) {
                     item.click();
                     return item.textContent.trim();
                 }
@@ -285,16 +303,14 @@ def click_chip(driver, text, label=None):
         const partialCandidates = [];
 
         for (const el of els) {
-            if (el.offsetParent === null) continue;
+            const rect = el.getBoundingClientRect();
+            if (el.offsetParent === null && rect.width === 0 && rect.height === 0) continue;
             
             let rawText = (el.textContent || el.value || '').trim().toLowerCase();
             if (!rawText || rawText.length > 45) continue;
 
             let cleanText = rawText.replace(/[^a-z0-9]+/g, '');
             if (!cleanText) continue;
-
-            const rect = el.getBoundingClientRect();
-            if (rect.width < 10 || rect.height < 10) continue;
 
             const childCount = el.children.length;
 
@@ -335,7 +351,7 @@ def select_dropdown_or_chip(driver, selectors, value, label="dropdown"):
         const val = arguments[1].toLowerCase();
         for (const s of sels) {
             const el = document.querySelector(s);
-            if (el && el.tagName === 'SELECT' && el.offsetParent !== null) {
+            if (el && el.tagName === 'SELECT') {
                 for (const opt of el.options) {
                     if (opt.text.toLowerCase().includes(val) || opt.value.toLowerCase() === val) {
                         el.value = opt.value;
@@ -365,7 +381,8 @@ def click_next_or_save(driver, step_name="step"):
             'button[type="submit"], input[type="submit"], #personal_details_submit, #education_submit, #preferences_submit, .btn-primary, button'
         );
         for (const b of btns) {
-            if (b.offsetParent !== null && !b.disabled) {
+            const rect = b.getBoundingClientRect();
+            if ((b.offsetParent !== null || rect.width > 0) && !b.disabled) {
                 const txt = (b.textContent || b.value || '').trim();
                 if (/^(next|continue|save|submit|done|find|let's go)/i.test(txt) || /save|next|continue/i.test(txt)) {
                     b.scrollIntoView({block: 'center'});
@@ -513,11 +530,9 @@ def fill_education(driver):
     close_modals(driver)
     driver.save_screenshot("education_start.png")
 
-    # 1. Tipe pendidikan / kualifikasi (Graduation / College)
     click_chip(driver, "Graduation", "Education Type (Graduation)")
     time.sleep(0.5)
 
-    # 2. College / University Name
     fill_autocomplete_generic(
         driver,
         "#college, input[name='college'], input[placeholder*='college' i], input[placeholder*='institute' i]",
@@ -526,7 +541,6 @@ def fill_education(driver):
     )
     time.sleep(0.5)
 
-    # 3. Degree (misal: B.Tech)
     if not fill_autocomplete_generic(
         driver,
         "#degree, input[name='degree'], input[placeholder*='degree' i]",
@@ -536,7 +550,6 @@ def fill_education(driver):
         click_chip(driver, DEGREE, "Degree Chip")
     time.sleep(0.5)
 
-    # 4. Stream / Specialization (misal: Computer Science)
     if not fill_autocomplete_generic(
         driver,
         "#stream, input[name='stream'], input[placeholder*='stream' i], input[placeholder*='specialization' i]",
@@ -546,7 +559,6 @@ def fill_education(driver):
         click_chip(driver, STREAM, "Stream Chip")
     time.sleep(0.5)
 
-    # 5. Start Year & End Year
     select_dropdown_or_chip(
         driver,
         "#start_year, select[name='start_year'], input[name='start_year'], input[placeholder*='start year' i]",
@@ -574,15 +586,12 @@ def fill_preferences(driver):
     close_modals(driver)
     driver.save_screenshot("preferences_start.png")
 
-    # 1. Looking for (Internships / Jobs)
     click_chip(driver, WORK_TYPE, f"Looking for: {WORK_TYPE}")
     time.sleep(0.5)
 
-    # 2. Work Mode (Work from home / In-office)
     click_chip(driver, WORK_MODE, f"Work Mode: {WORK_MODE}")
     time.sleep(0.5)
 
-    # 3. Areas of Interest
     for interest in INTEREST_AREAS:
         if not click_chip(driver, interest, f"Interest Chip: {interest}"):
             fill_autocomplete_generic(
@@ -593,7 +602,6 @@ def fill_preferences(driver):
             )
         time.sleep(0.5)
 
-    # 4. Preferred City (Jika ditanyakan lokasi preferensi)
     fill_autocomplete_generic(
         driver,
         "input[placeholder*='city' i], input[placeholder*='location' i], #preferred_city",
@@ -630,7 +638,6 @@ def fill_onboarding(driver):
     driver.save_screenshot("onboarding_start.png")
     print(Fore.YELLOW + f"[i] URL: {driver.current_url}")
 
-    # ---- NAMA (Jaga-jaga jika first_name / last_name kosong di personal details) ----
     parts = NAME.split(maxsplit=1)
     first_name = parts[0]
     last_name  = parts[1] if len(parts) > 1 else ""
@@ -687,7 +694,6 @@ def fill_onboarding(driver):
         elif any(k in curr_url for k in ["preference", "interest", "career"]) or "areas of interest" in page_src or "looking for" in page_src:
             fill_preferences(driver)
         else:
-            # Jika halaman berupa SPA tanpa perubahan URL mencolok, jalankan berurutan
             fill_education(driver)
             fill_preferences(driver)
             break
@@ -700,8 +706,19 @@ def fill_onboarding(driver):
 # ============================================================
 def signup(driver, email):
     print(Fore.CYAN + "[*] buka halaman signup...")
+    driver.delete_all_cookies()
     driver.get(SIGNUP_URL)
-    time.sleep(WAIT_LONG)
+
+    # Tunggu sampai input #email benar-benar siap di DOM
+    try:
+        WebDriverWait(driver, 15).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "#email, input[name='email']"))
+        )
+    except Exception:
+        print(Fore.YELLOW + f"[~] Form signup belum terdeteksi! Judul halaman: {driver.title!r}")
+        driver.save_screenshot("signup_load_error.png")
+
+    time.sleep(2)
     close_modals(driver)
 
     parts = NAME.split(maxsplit=1)
@@ -709,23 +726,27 @@ def signup(driver, email):
     last_name  = parts[1] if len(parts) > 1 else ""
 
     print(Fore.CYAN + f"[*] isi form untuk {email}...")
-    js_fill(driver, "#email",      email,      "email")
+    ok_email = js_fill(driver, "#email, input[name='email'], input[type='email']", email, "email")
     time.sleep(0.5)
-    js_fill(driver, "#password",   PASSWORD,   "password")
+    js_fill(driver, "#password, input[name='password'], input[type='password']", PASSWORD, "password")
     time.sleep(0.5)
-    js_fill(driver, "#first_name", first_name, "first_name")
+    js_fill(driver, "#first_name, input[name='first_name']", first_name, "first_name")
     time.sleep(0.5)
-    js_fill(driver, "#last_name",  last_name,  "last_name")
+    js_fill(driver, "#last_name, input[name='last_name']", last_name, "last_name")
     time.sleep(0.5)
 
     driver.save_screenshot("before_submit.png")
 
+    if not ok_email:
+        print(Fore.RED + "[!] Gagal menemukan form pendaftaran (cek before_submit.png apakah terkena Cloudflare/Captcha).")
+        return "error"
+
     print(Fore.CYAN + "[*] submit...")
     try:
-        driver.find_element(By.CSS_SELECTOR, "#registration_submit").click()
+        driver.find_element(By.CSS_SELECTOR, "#registration_submit, button[type='submit']").click()
     except Exception:
         driver.execute_script(
-            "document.querySelector('#registration_submit').click();"
+            "const btn = document.querySelector('#registration_submit, button[type=\"submit\"]'); if (btn) btn.click();"
         )
     time.sleep(WAIT_LONG)
 
@@ -733,19 +754,26 @@ def signup(driver, email):
     print(Fore.YELLOW + f"[i] URL: {current}")
     driver.save_screenshot("after_submit.png")
 
-    page = driver.page_source.lower()
+    # Cek apakah ada pesan error spesifik di elemen error/alert (bukan teks 'Already registered? Login')
+    error_text = driver.execute_script("""
+        const errs = document.querySelectorAll('.help-block, .error, .alert, .toast-message, #email-error, .field-error');
+        return Array.from(errs)
+            .filter(e => e.offsetParent !== null || e.textContent.trim().length > 0)
+            .map(e => e.textContent.trim().toLowerCase())
+            .join(' | ');
+    """) or ""
 
-    if "already" in page or "exists" in page:
-        print(Fore.RED + "[!] email sudah terdaftar.")
+    if any(k in error_text for k in ["already registered", "already exists", "taken", "terdaftar"]):
+        print(Fore.RED + f"[!] email sudah terdaftar ({error_text}).")
         return "already_exists"
     if is_verify_page(driver):
         print(Fore.GREEN + "[✓] masuk halaman verifikasi.")
         return "verify_email"
-    if "dashboard" in current or "student" in current or "onboarding" in current or "personal_details" in current:
+    if any(k in current.lower() for k in ["dashboard", "onboarding", "personal_details", "verify", "education", "preference"]):
         print(Fore.GREEN + "[✓] langsung masuk onboarding/dashboard.")
         return "success"
-    if "error" in page or "invalid" in page:
-        print(Fore.RED + "[!] error di form.")
+    if error_text:
+        print(Fore.RED + f"[!] error di form: {error_text}")
         return "error"
     return "unknown"
 
