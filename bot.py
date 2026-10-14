@@ -17,14 +17,18 @@ from webdriver_manager.chrome import ChromeDriverManager
 init(autoreset=True)
 
 # ============================================================
-#  CONFIG
+#  CONFIG — Indian data
 # ============================================================
 SIGNUP_URL = "https://internshala.com/registration/student"
 
 PASSWORD = "Dermaga07"
 NAME     = "Arya Rahman"
-PHONE    = "081234567890"
+PHONE    = "9876543210"
 CITY     = "Mumbai"
+LINKEDIN = "https://www.linkedin.com/in/arya-rahman-mumbai"
+SALARY   = "300000"
+COLLEGE  = "University of Mumbai"
+STREAM   = "Computer Science"
 
 # Selector signup
 SEL_EMAIL      = "#email"
@@ -39,11 +43,9 @@ SEL_OTP_INPUT  = "input[name='otp'], input#otp, input[name='verification_code']"
 SEL_OTP_SUBMIT = "button#verify_submit, button[type='submit']"
 
 # Selector onboarding
-SEL_PHONE          = "input[name='phone'], #phone"
-SEL_CITY           = "select[name='city'], #city, input[name='city']"
-SEL_GENDER         = "select[name='gender']"
-SEL_USER_TYPE      = "select[name='user_type']"
-SEL_PROFILE_SUBMIT = "button[type='submit'], #profile_submit"
+SEL_PHONE          = "#phone"
+SEL_CITY           = "#current_city"
+SEL_PROFILE_SUBMIT = "#save_personal_details, button[type='submit'], .save-btn"
 
 WAIT_SHORT = 2
 WAIT_LONG  = 5
@@ -315,7 +317,6 @@ def fill_onboarding(driver):
                 el_type  = el.get_attribute("type")
                 el_ph    = el.get_attribute("placeholder")
                 el_text  = (el.text or "")[:50]
-                # untuk select, list option-nya
                 opts = ""
                 if tag == "select":
                     try:
@@ -334,47 +335,146 @@ def fill_onboarding(driver):
     driver.save_screenshot("onboarding_debug.png")
     # ============================================
 
-    # ---- phone ----
-    safe_fill(driver, SEL_PHONE, PHONE, "phone")
-    time.sleep(0.7)
+    # ---- split nama ----
+    parts = NAME.split(maxsplit=1)
+    first_name = parts[0]
+    last_name  = parts[1] if len(parts) > 1 else ""
 
-    # ---- city ----
+    # ---- first name ----
     try:
-        city_el = driver.find_element(By.CSS_SELECTOR, SEL_CITY)
-        tag = city_el.tag_name.lower()
-        if tag == "select":
-            Select(city_el).select_by_visible_text("Mumbai")
-            print(Fore.GREEN + "[✓] city dropdown -> Mumbai")
-        else:
-            city_el.clear()
-            city_el.send_keys(CITY)
-            print(Fore.GREEN + "[✓] city input -> Mumbai")
+        el = driver.find_element(By.CSS_SELECTOR, "#first_name")
+        if not el.get_attribute("value"):
+            el.clear()
+            el.send_keys(first_name)
+            print(Fore.GREEN + f"[✓] first_name -> {first_name}")
     except Exception as e:
-        print(Fore.YELLOW + f"[~] city skip: {e}")
+        print(Fore.YELLOW + f"[~] first_name skip: {e}")
+
+    # ---- last name ----
+    try:
+        el = driver.find_element(By.CSS_SELECTOR, "#last_name")
+        if not el.get_attribute("value"):
+            el.clear()
+            el.send_keys(last_name)
+            print(Fore.GREEN + f"[✓] last_name -> {last_name}")
+    except Exception as e:
+        print(Fore.YELLOW + f"[~] last_name skip: {e}")
+
+    # ---- phone (India 10 digit) ----
+    safe_fill(driver, "#phone", PHONE, f"phone ({PHONE})")
     time.sleep(0.7)
 
-    # ---- gender ----
+    # ---- current_city ----
+    safe_fill(driver, "#current_city", CITY, f"city ({CITY})")
+    time.sleep(0.7)
+
+    # ---- linkedin ----
     try:
-        Select(driver.find_element(By.CSS_SELECTOR, SEL_GENDER)).select_by_visible_text("Male")
-        print(Fore.GREEN + "[✓] gender -> Male")
+        el = driver.find_element(By.CSS_SELECTOR, "#linkedin_url")
+        if not el.get_attribute("value"):
+            el.send_keys(LINKEDIN)
+            print(Fore.GREEN + f"[✓] linkedin -> {LINKEDIN}")
     except Exception:
         pass
 
-    # ---- user type ----
+    # ---- salary (INR) ----
     try:
-        Select(driver.find_element(By.CSS_SELECTOR, SEL_USER_TYPE)).select_by_visible_text("Fresher")
-        print(Fore.GREEN + "[✓] user_type -> Fresher")
+        el = driver.find_element(By.CSS_SELECTOR, "#salary")
+        if not el.get_attribute("value"):
+            el.send_keys(SALARY)
+            print(Fore.GREEN + f"[✓] salary -> INR {SALARY}")
+    except Exception:
+        pass
+
+    # ---- college (placeholder "Eg. BITS Pilani") ----
+    try:
+        els = driver.find_elements(
+            By.CSS_SELECTOR,
+            "input[placeholder*='BITS'], input[placeholder*='Pilani']"
+        )
+        if els and not els[0].get_attribute("value"):
+            els[0].clear()
+            els[0].send_keys(COLLEGE)
+            print(Fore.GREEN + f"[✓] college -> {COLLEGE}")
+    except Exception:
+        pass
+
+    # ---- stream (placeholder "Eg. Computer Science") ----
+    try:
+        el = driver.find_element(By.CSS_SELECTOR, "#personal-details-stream")
+        if not el.get_attribute("value"):
+            el.clear()
+            el.send_keys(STREAM)
+            print(Fore.GREEN + f"[✓] stream -> {STREAM}")
     except Exception:
         pass
 
     driver.save_screenshot("onboarding_filled.png")
 
-    if safe_click(driver, SEL_PROFILE_SUBMIT, "profile submit"):
+    # ---- cari tombol save/next ----
+    save_selectors = [
+        "button#save_personal_details",
+        "button.save-btn",
+        "button[type='submit']",
+        "a.save-btn",
+        "div.save-btn",
+        "input[type='submit']",
+        "#submit",
+    ]
+    saved = False
+    for sel in save_selectors:
+        try:
+            el = driver.find_element(By.CSS_SELECTOR, sel)
+            driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
+            time.sleep(0.5)
+            el.click()
+            print(Fore.GREEN + f"[✓] save clicked via {sel}")
+            saved = True
+            break
+        except Exception:
+            continue
+
+    if not saved:
+        try:
+            btns = driver.find_elements(By.XPATH,
+                "//button[contains(translate(., 'SAVE', 'save'), 'save') "
+                "or contains(translate(., 'NEXT', 'next'), 'next') "
+                "or contains(translate(., 'CONTINUE', 'continue'), 'continue') "
+                "or contains(translate(., 'SUBMIT', 'submit'), 'submit')]"
+            )
+            if btns:
+                driver.execute_script("arguments[0].scrollIntoView({block:'center'});", btns[0])
+                time.sleep(0.5)
+                btns[0].click()
+                print(Fore.GREEN + f"[✓] save clicked via text: {btns[0].text[:30]}")
+                saved = True
+        except Exception as e:
+            print(Fore.YELLOW + f"[~] text save skip: {e}")
+
+    if saved:
         time.sleep(WAIT_LONG)
         driver.save_screenshot("onboarding_done.png")
-        print(Fore.GREEN + "[✓] onboarding submitted.")
-        return True
-    return False
+        print(Fore.YELLOW + f"[i] URL setelah save: {driver.current_url}")
+
+        if "personal_details" not in driver.current_url:
+            print(Fore.CYAN + f"\n[*] lanjut halaman berikutnya: {driver.current_url}")
+            time.sleep(3)
+            print(Fore.CYAN + "\n=== FORM ELEMENTS HALAMAN BERIKUTNYA ===")
+            for tag in ["input", "select", "button"]:
+                for el in driver.find_elements(By.TAG_NAME, tag):
+                    try:
+                        el_id    = el.get_attribute("id")
+                        el_name  = el.get_attribute("name")
+                        el_ph    = el.get_attribute("placeholder")
+                        el_type  = el.get_attribute("type")
+                        if el_id or el_name or el_ph:
+                            print(f"[{tag}] id={el_id!r} name={el_name!r} type={el_type!r} placeholder={el_ph!r}")
+                    except Exception:
+                        pass
+            print("=== END DUMP ===\n")
+            driver.save_screenshot("onboarding_next.png")
+
+    return saved
 
 
 # ============================================================
@@ -445,6 +545,7 @@ def log_account(email, status):
         "email": email,
         "name": NAME,
         "password": PASSWORD,
+        "phone": PHONE,
         "city": CITY,
         "status": status,
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
@@ -458,9 +559,10 @@ def log_account(email, status):
 # ============================================================
 def main():
     print(Fore.CYAN + "=" * 55)
-    print(Fore.CYAN + "   INTERNSHALA SEMI-AUTO SIGNUP")
+    print(Fore.CYAN + "   INTERNSHALA SEMI-AUTO SIGNUP (India)")
     print(Fore.CYAN + f"   Nama     : {NAME}")
     print(Fore.CYAN + f"   Password : {PASSWORD}")
+    print(Fore.CYAN + f"   Phone    : +91 {PHONE}")
     print(Fore.CYAN + f"   City     : {CITY}")
     print(Fore.CYAN + "=" * 55)
 
